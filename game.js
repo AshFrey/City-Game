@@ -1518,12 +1518,12 @@ function shootSquareLine() {
 
   player.squareOrbs.pop();
   player.squareOrbs.pop();
-  fireSquareShot(player.facing, 3, 24, "#d37cff", 2, true, 1 / 3);
+  fireSquareShot(player.facing, 3, 24, "#d37cff", Infinity, true, 1 / 3, 1, 3);
   player.barrelCooldown = barrelAbility.cooldown;
   player.squareRegen = Math.min(player.squareRegen, 1.6);
 }
 
-function fireSquareShot(angle, damage, size, color, pierce = 0, leavesTrail = false, bossDamageMultiplier = 1, hitCount = 1) {
+function fireSquareShot(angle, damage, size, color, pierce = 0, leavesTrail = false, bossDamageMultiplier = 1, hitCount = 1, shieldHits = 1) {
   squareShots.push({
     x: player.x + Math.cos(angle) * 34,
     y: player.y + Math.sin(angle) * 34,
@@ -1532,6 +1532,7 @@ function fireSquareShot(angle, damage, size, color, pierce = 0, leavesTrail = fa
     size,
     damage,
     hitCount,
+    shieldHits,
     pierce,
     bossDamageMultiplier,
     color,
@@ -1563,7 +1564,7 @@ function updateSquareShots(delta) {
       const hitCount = shot.hitCount || 1;
       for (let hit = 0; hit < hitCount; hit += 1) {
         const damage = enemy.type === "boss" ? shot.damage * shot.bossDamageMultiplier : shot.damage;
-        damageEnemy(enemy, damage, shot.color);
+        damageSquareShotEnemy(enemy, damage, shot);
         registerEnemyDefeat(enemy);
         if (enemy.defeated) break;
       }
@@ -1577,6 +1578,18 @@ function updateSquareShots(delta) {
   }
 
   squareShots = squareShots.filter((shot) => shot.life > 0);
+}
+
+function damageSquareShotEnemy(enemy, damage, shot) {
+  if ((enemy.shield || 0) > 0) {
+    enemy.hitCooldown = 0.58;
+    const shieldDamage = Math.min(enemy.shield, shot.shieldHits || 1);
+    enemy.shield -= shieldDamage;
+    burst(enemy.x, enemy.y, shot.color, 8 + shieldDamage * 3);
+    return;
+  }
+
+  damageEnemy(enemy, damage, shot.color);
 }
 
 function dropSquareShotTrail(shot, delta) {
