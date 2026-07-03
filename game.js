@@ -1366,6 +1366,7 @@ function shootProjectile(enemy, angle, options = {}) {
     life: options.life || 2.4,
     damage: options.damage || 13,
     color: options.color || "#d8ecff",
+    wallBounces: options.wallBounces ?? 1,
   });
 }
 
@@ -1392,12 +1393,20 @@ function updateProjectiles(delta) {
         projectile.y = nextY;
       }
     } else {
-      projectile.x = nextX;
-      projectile.y = nextY;
+      const hitWallX = collidesWithBuilding(nextX, projectile.y, projectile.size);
+      const hitWallY = collidesWithBuilding(projectile.x, nextY, projectile.size);
 
-      if (collidesWithBuilding(projectile.x, projectile.y, projectile.size)) {
+      if ((hitWallX || hitWallY) && projectile.wallBounces > 0) {
+        if (hitWallX) projectile.vx *= -1;
+        if (hitWallY) projectile.vy *= -1;
+        projectile.wallBounces -= 1;
+        burst(projectile.x, projectile.y, "#d8ecff", 5);
+      } else if (hitWallX || hitWallY) {
         projectile.life = 0;
         burst(projectile.x, projectile.y, "#d8ecff", 5);
+      } else {
+        projectile.x = nextX;
+        projectile.y = nextY;
       }
     }
 
@@ -1996,7 +2005,7 @@ function shootDemonFireball() {
     damage: 0,
     friendly: true,
     enemyDamage: demonFireball.damage,
-    wallBounces: 0,
+    wallBounces: 1,
     coneExplosion: true,
     color: "#ff6f32",
     burstColor: "#ff6f32",
