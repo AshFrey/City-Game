@@ -3080,7 +3080,7 @@ function drawBat() {
   const swingProgress = player.swingTime > 0 ? 1 - player.swingTime / bat.duration : 0;
   const easedSwing = 1 - Math.pow(1 - swingProgress, 3);
   const swingAngle = player.facing - bat.arc / 2 + bat.arc * easedSwing;
-  const idleAngle = player.facing + Math.PI * 0.78;
+  const idleAngle = player.facing - Math.PI * 0.06;
   const angle = player.swingTime > 0 ? swingAngle : idleAngle;
 
   if (player.swingTime > 0) {
