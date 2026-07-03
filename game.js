@@ -1518,7 +1518,7 @@ function shootSquareLine() {
 
   player.squareOrbs.pop();
   player.squareOrbs.pop();
-  fireSquareShot(player.facing, 3, 24, "#d37cff", Infinity, true, 1 / 3);
+  fireSquareShot(player.facing, 3, 24, "#d37cff", 2, true, 1 / 3);
   player.barrelCooldown = barrelAbility.cooldown;
   player.squareRegen = Math.min(player.squareRegen, 1.6);
 }
