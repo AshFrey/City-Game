@@ -111,7 +111,7 @@ const adminPower = {
   blitzTravelTime: 0.28,
   rayDuration: 2.5,
   rayWidth: 1.65,
-  rayDamage: 10,
+  rayDamage: 5,
   rayBossDamageMultiplier: 0.5,
   rayTickRate: 0.22,
 };
@@ -125,6 +125,7 @@ let fires;
 let pickups;
 let buildings;
 let particles;
+let heatWaves;
 let adminBeams;
 let thunderbolts;
 let lastTime = 0;
@@ -146,15 +147,17 @@ let aimingWithPointer = false;
 function loadCharacterUnlocks() {
   try {
     const saved = JSON.parse(localStorage.getItem("cityBattleRivalUnlocks") || "{}");
+    const newUnlockRules = saved.unlockVersion === 2;
     return {
       bat: true,
       demon: Boolean(saved.demon),
       square: Boolean(saved.square),
-      paladin: true,
-      admin: true,
+      paladin: newUnlockRules && Boolean(saved.paladin),
+      admin: newUnlockRules && Boolean(saved.admin),
+      unlockVersion: 2,
     };
   } catch {
-    return { bat: true, demon: false, square: false, paladin: true, admin: true };
+    return { bat: true, demon: false, square: false, paladin: false, admin: false, unlockVersion: 2 };
   }
 }
 
@@ -171,6 +174,7 @@ function unlockCharacter(character) {
 }
 
 function canUseCharacter(character) {
+  if (teleportEnabled) return true;
   return Boolean(unlockedCharacters[character]);
 }
 
@@ -181,10 +185,10 @@ function updateCharacterButtons() {
   demonButton.textContent = canUseCharacter("demon") ? "Demon Dude" : "Demon Dude (Locked)";
   squareButton.disabled = !canUseCharacter("square");
   squareButton.textContent = canUseCharacter("square") ? "Square Dude" : "Square Dude (Locked)";
-  paladinButton.disabled = false;
-  paladinButton.textContent = "Paladin Dude";
-  adminButton.disabled = false;
-  adminButton.textContent = "Lightning Dude";
+  paladinButton.disabled = !canUseCharacter("paladin");
+  paladinButton.textContent = canUseCharacter("paladin") ? "Paladin Dude" : "Paladin Dude (Locked)";
+  adminButton.disabled = !canUseCharacter("admin");
+  adminButton.textContent = canUseCharacter("admin") ? "Lightning Dude" : "Lightning Dude (Locked)";
   updateTeleportMenu();
 }
 
@@ -265,6 +269,7 @@ function resetGame() {
   fires = [];
   pickups = [];
   particles = [];
+  heatWaves = [];
   adminBeams = [];
   thunderbolts = [];
   buildings = makeBuildings();
@@ -333,6 +338,7 @@ function startWave(nextWave) {
   projectiles = [];
   barrels = [];
   fires = [];
+  heatWaves = [];
 
   if (wave === 5) {
     startBossFight(1);
@@ -349,7 +355,7 @@ function startWave(nextWave) {
 
   const waveCounts = { 1: 5, 2: 7, 3: 9, 4: 11, 6: 12, 7: 14, 8: 16, 9: 18, 11: 16, 12: 18, 13: 19, 14: 21 };
   const count = waveCounts[wave] || 5;
-  if (wave === 13) spawnGuardianPillars();
+  if (wave === 13 || wave === 14) spawnGuardianPillars();
   for (let i = 0; i < count; i += 1) {
     spawnEnemy();
   }
@@ -511,6 +517,8 @@ function spawnGuardianPillars() {
   const margin = 145;
   const spots = [
     { x: margin, y: margin },
+    { x: world.width - margin, y: margin },
+    { x: margin, y: world.height - margin },
     { x: world.width - margin, y: world.height - margin },
   ];
 
@@ -630,6 +638,7 @@ function update(delta) {
   updateSquareOrbs(delta);
   updateSpinAttack(delta);
   updatePickups(delta);
+  updateHeatWaves(delta);
   updateParticles(delta);
   updateCamera();
   checkWaveClear();
@@ -742,7 +751,8 @@ function updateBatUltimate(delta) {
   for (const enemy of enemies) {
     if (enemy.defeated || distance(enemy, player) > 66 + enemy.size) continue;
     const angle = Math.atan2(enemy.y - player.y, enemy.x - player.x);
-    damageEnemy(enemy, enemy.shield > 0 ? 0 : 1.25, "#8fb7ff");
+    const rushDamage = enemy.shield > 0 ? 0 : enemy.type === "boss" ? 0.625 : 1.25;
+    damageEnemy(enemy, rushDamage, "#8fb7ff");
     enemy.x += Math.cos(angle) * 20;
     enemy.y += Math.sin(angle) * 20;
     burst(enemy.x, enemy.y, "#8fb7ff", 7);
@@ -810,7 +820,8 @@ function updateEnemies(delta) {
     const enemyDistance = distance(enemy, player);
     const wantsRange = (enemy.type === "shooter" || enemy.type === "beam") && enemyDistance < 360;
     const isBound = enemy.boundTime > 0;
-    const movementSpeed = isBound || enemy.chargeTime > 0 || enemy.jumpTime > 0 ? 0 : wantsRange ? enemy.speed * 0.25 : enemy.speed;
+    const protectionSlow = guardianPillarsActive() && enemy.type !== "guardianPillar" && enemy.type !== "pillar" ? 0.5 : 1;
+    const movementSpeed = isBound || enemy.chargeTime > 0 || enemy.jumpTime > 0 ? 0 : wantsRange ? enemy.speed * 0.25 * protectionSlow : enemy.speed * protectionSlow;
     const nextX = enemy.x + Math.cos(angle) * movementSpeed * delta;
     const nextY = enemy.y + Math.sin(angle) * movementSpeed * delta;
 
@@ -2032,44 +2043,28 @@ function performPaladinSlam() {
 
 function createPaladinFireCross() {
   const target = findUltimateTarget() || player;
-  if (target !== player) target.boundTime = Math.max(target.boundTime || 0, 5.8);
-  const spacing = 42;
-  const length = 7;
-  for (let i = -length; i <= length; i += 1) {
-    const spots = [
-      { x: target.x + i * spacing, y: target.y },
-      { x: target.x, y: target.y + i * spacing },
-    ];
-    for (const spot of spots) {
-      fires.push({
-        x: spot.x,
-        y: spot.y,
-        radius: 40,
-        life: 5.8,
-        tick: 0,
-        tickRate: 0.24,
-        damage: 1.2,
-        bossDamageMultiplier: 1 / 15,
-        damageColor: "#ff9b3f",
-      });
-    }
-  }
+  const length = 620;
+  const width = 54;
+  heatWaves.push({
+    x: target.x,
+    y: target.y,
+    length,
+    width,
+    life: 1.15,
+    duration: 1.15,
+  });
 
-  for (let i = 0; i < 10; i += 1) {
-    const angle = (Math.PI * 2 * i) / 10;
-    fires.push({
-      x: target.x + Math.cos(angle) * 72,
-      y: target.y + Math.sin(angle) * 72,
-      radius: 32,
-      life: 5.8,
-      tick: 0,
-      tickRate: 0.24,
-      damage: 1.2,
-      bossDamageMultiplier: 1 / 15,
-      damageColor: "#ff9b3f",
-    });
+  for (const enemy of enemies) {
+    if (enemy.defeated) continue;
+    const inHorizontal = Math.abs(enemy.y - target.y) <= width + enemy.size && Math.abs(enemy.x - target.x) <= length + enemy.size;
+    const inVertical = Math.abs(enemy.x - target.x) <= width + enemy.size && Math.abs(enemy.y - target.y) <= length + enemy.size;
+    if (!inHorizontal && !inVertical) continue;
+
+    damageEnemyHeavy(enemy, 22.5, "#ffb04a");
+    burst(enemy.x, enemy.y, "#ffb04a", 18);
+    registerEnemyDefeat(enemy);
   }
-  burst(target.x, target.y, "#ffd166", 54);
+  burst(target.x, target.y, "#ffd166", 48);
 }
 
 function findUltimateTarget() {
@@ -2197,6 +2192,24 @@ function damageEnemy(enemy, amount, shieldColor) {
   enemy.health -= amount;
 }
 
+function damageEnemyHeavy(enemy, amount, shieldColor) {
+  enemy.hitCooldown = 0.58;
+  if (guardianPillarsActive() && enemy.type !== "guardianPillar" && enemy.type !== "pillar" && enemy.type !== "boss") {
+    burst(enemy.x, enemy.y, "#73e0d1", 8);
+    return;
+  }
+
+  if (enemy.invincibleShield) {
+    burst(enemy.x, enemy.y, shieldColor || "#ffd166", 10);
+    return;
+  }
+
+  const shieldBlock = Math.min(enemy.shield || 0, amount);
+  enemy.shield = Math.max(0, (enemy.shield || 0) - shieldBlock);
+  enemy.health -= amount - shieldBlock;
+  burst(enemy.x, enemy.y, shieldColor || "#ffb04a", enemy.shield > 0 ? 10 : 16);
+}
+
 function damagePlayer(amount) {
   const shieldBlock = Math.min(player.shield, amount);
   player.shield -= shieldBlock;
@@ -2249,6 +2262,8 @@ function registerEnemyDefeat(enemy) {
         bossStage = 0;
         startWave(6);
       } else if (bossStage === 2) {
+        if (player.character === "square") unlockCharacter("paladin");
+        if (player.character === "paladin") unlockCharacter("admin");
         bossFight = false;
         bossStage = 0;
         startWave(11);
@@ -2455,6 +2470,13 @@ function updateParticles(delta) {
   particles = particles.filter((p) => p.life > 0);
 }
 
+function updateHeatWaves(delta) {
+  for (const waveEffect of heatWaves) {
+    waveEffect.life -= delta;
+  }
+  heatWaves = heatWaves.filter((waveEffect) => waveEffect.life > 0);
+}
+
 function burst(x, y, color, count) {
   for (let i = 0; i < count; i += 1) {
     const angle = Math.random() * Math.PI * 2;
@@ -2539,6 +2561,7 @@ function draw() {
 
   drawBossWarnings();
   for (const fire of fires) drawFire(fire);
+  for (const waveEffect of heatWaves) drawHeatWave(waveEffect);
   for (const pickup of pickups) drawPickup(pickup);
   for (const particle of particles) drawParticle(particle);
   for (const barrel of barrels) drawBarrel(barrel);
@@ -3307,6 +3330,37 @@ function drawFire(fire) {
   }
 }
 
+function drawHeatWave(waveEffect) {
+  const progress = 1 - waveEffect.life / waveEffect.duration;
+  const alpha = Math.max(0, waveEffect.life / waveEffect.duration);
+  const x = waveEffect.x - camera.x;
+  const y = waveEffect.y - camera.y;
+  const pulseWidth = waveEffect.width * (0.85 + progress * 0.65);
+  const pulseLength = waveEffect.length * (0.25 + progress * 0.75);
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = "rgba(255, 176, 74, 0.86)";
+  ctx.lineWidth = pulseWidth;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-pulseLength, 0);
+  ctx.lineTo(pulseLength, 0);
+  ctx.moveTo(0, -pulseLength);
+  ctx.lineTo(0, pulseLength);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255, 242, 180, 0.85)";
+  ctx.lineWidth = Math.max(8, pulseWidth * 0.28);
+  ctx.beginPath();
+  ctx.moveTo(-pulseLength, 0);
+  ctx.lineTo(pulseLength, 0);
+  ctx.moveTo(0, -pulseLength);
+  ctx.lineTo(0, pulseLength);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawSquareTrail(fire) {
   const alpha = Math.max(0, fire.life / (fire.duration || squareTrail.duration));
   const x = fire.x - camera.x;
@@ -3391,8 +3445,46 @@ function drawHud() {
     ? `Pillars left ${enemies.filter((enemy) => enemy.type === "pillar" && !enemy.defeated).length}`
     : bossFight ? (bossStage === 3 ? "Defeat the third boss" : bossStage === 2 ? "Defeat the second boss" : "Defeat the boss") : "Clear all enemies";
   ctx.fillText(objective, 18, 120);
+  drawPillarWarning();
   drawBossHud();
   drawAbilityHud();
+}
+
+function drawPillarWarning() {
+  const pillars = enemies.filter((enemy) => (enemy.type === "pillar" || enemy.type === "guardianPillar") && !enemy.defeated);
+  if (pillars.length === 0) return;
+
+  const centerX = canvas.width / 2;
+  const topY = 28;
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.font = "900 18px system-ui, sans-serif";
+  ctx.fillStyle = "rgba(12, 13, 15, 0.74)";
+  ctx.fillRect(centerX - 155, 9, 310, 42);
+  ctx.strokeStyle = "rgba(115, 224, 209, 0.8)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(centerX - 155, 9, 310, 42);
+  ctx.fillStyle = "#d8ffff";
+  ctx.fillText("WARNING: PILLARS PROTECTING", centerX, topY + 4);
+
+  for (const pillar of pillars) {
+    const angle = Math.atan2(pillar.y - player.y, pillar.x - player.x);
+    const arrowX = centerX + Math.cos(angle) * 190;
+    const arrowY = 62 + Math.sin(angle) * 18;
+    ctx.save();
+    ctx.translate(arrowX, arrowY);
+    ctx.rotate(angle);
+    ctx.fillStyle = "#73e0d1";
+    ctx.beginPath();
+    ctx.moveTo(18, 0);
+    ctx.lineTo(-10, -9);
+    ctx.lineTo(-5, 0);
+    ctx.lineTo(-10, 9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
 }
 
 function drawBossHud() {
