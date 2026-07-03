@@ -106,9 +106,14 @@ const adminPower = {
   boltCooldown: spinAbility.cooldown,
   blitzCooldown: 15,
   blitzWidth: 70,
-  blitzDamage: 6,
+  blitzDamage: 12,
   blitzCharge: 0.16,
   blitzTravelTime: 0.28,
+  ultimateBlitzWidth: 110,
+  ultimateBlitzDamage: 18,
+  ultimateBlitzTravelTime: 0.36,
+  ultimateBoltDamage: 5,
+  ultimateBoltRadius: paladinSlam.radius * 0.9,
   rayDuration: 2.5,
   rayWidth: 1.65,
   rayDamage: 5,
@@ -250,6 +255,7 @@ function resetGame() {
     adminBlitzEnd: null,
     adminBlitzAngle: 0,
     adminBlitzElapsed: 0,
+    adminBlitzDuration: adminPower.blitzTravelTime,
     adminBlitzHits: new Set(),
     adminBlitzTick: 0,
     adminRayTick: 0,
@@ -719,9 +725,8 @@ function activateUltimate() {
   player.ultimateTick = 0;
 
   if (player.character === "admin") {
-    player.ultimateActive = adminPower.rayDuration;
-    player.adminRayTick = 0;
-    burst(player.x, player.y, "#d8ffff", 46);
+    player.ultimateActive = adminPower.ultimateBlitzTravelTime + 0.65;
+    activateAdminUltimateBlitz();
   } else if (player.character === "bat") {
     player.ultimateActive = ultimateAbility.batDuration;
     player.shield = Math.min(player.maxShield, player.shield + 28);
@@ -1745,6 +1750,39 @@ function summonAdminThunderbolt(x = pointerWorld.x, y = pointerWorld.y, damage =
   }
 }
 
+function summonAdminThunderRing(center, count, radius, damage, strikeRadius) {
+  summonAdminThunderbolt(center.x, center.y, damage, strikeRadius);
+  for (let i = 0; i < count; i += 1) {
+    const angle = (Math.PI * 2 * i) / count + Math.random() * 0.18;
+    const spread = radius * (0.55 + Math.random() * 0.45);
+    summonAdminThunderbolt(
+      center.x + Math.cos(angle) * spread,
+      center.y + Math.sin(angle) * spread,
+      damage,
+      strikeRadius
+    );
+  }
+}
+
+function summonAdminThunderLine(start, end, count, spread, damage, strikeRadius) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const normalX = -dy / length;
+  const normalY = dx / length;
+
+  for (let i = 1; i <= count; i += 1) {
+    const progress = i / (count + 1);
+    const offset = (Math.random() - 0.5) * spread;
+    summonAdminThunderbolt(
+      start.x + dx * progress + normalX * offset,
+      start.y + dy * progress + normalY * offset,
+      damage,
+      strikeRadius
+    );
+  }
+}
+
 function activateAdminThunderbolt() {
   if (player.character !== "admin" || !player.spinUnlocked || state !== "playing" || player.spinCooldown > 0) return;
 
@@ -1764,6 +1802,7 @@ function activateAdminBlitz() {
   player.adminBlitzEnd = end;
   player.adminBlitzAngle = angle;
   player.adminBlitzElapsed = 0;
+  player.adminBlitzDuration = adminPower.blitzTravelTime;
   player.adminBlitzHits = new Set();
   player.barrelCooldown = adminPower.blitzCooldown;
   player.invulnerable = Math.max(player.invulnerable, adminPower.blitzCharge + adminPower.blitzTravelTime + 0.15);
@@ -1777,6 +1816,7 @@ function startAdminBlitzTravel() {
 
   player.adminBlitzTime = adminPower.blitzTravelTime;
   player.adminBlitzElapsed = 0;
+  player.adminBlitzDuration = adminPower.blitzTravelTime;
   adminBeams.push({
     x: start.x,
     y: start.y,
@@ -1799,6 +1839,50 @@ function startAdminBlitzTravel() {
   }
 }
 
+function activateAdminUltimateBlitz() {
+  if (player.adminBlitzTime > 0 || player.adminBlitzCharge > 0) return;
+
+  const start = { x: player.x, y: player.y };
+  const angle = Math.atan2(pointerWorld.y - player.y, pointerWorld.x - player.x);
+  const end = findBlitzEndPoint(angle);
+  player.facing = angle;
+  player.adminBlitzStart = start;
+  player.adminBlitzEnd = end;
+  player.adminBlitzAngle = angle;
+  player.adminBlitzElapsed = 0;
+  player.adminBlitzDuration = adminPower.ultimateBlitzTravelTime;
+  player.adminBlitzTime = adminPower.ultimateBlitzTravelTime;
+  player.adminBlitzHits = new Set();
+  player.invulnerable = Math.max(player.invulnerable, adminPower.ultimateBlitzTravelTime + 0.35);
+
+  adminBeams.push({
+    x: start.x,
+    y: start.y,
+    angle,
+    range: distance(start, end),
+    life: adminPower.ultimateBlitzTravelTime + 0.22,
+    duration: adminPower.ultimateBlitzTravelTime + 0.22,
+    blitz: true,
+    ultimate: true,
+  });
+
+  summonAdminThunderRing(start, 8, 150, adminPower.ultimateBoltDamage, adminPower.ultimateBoltRadius);
+  summonAdminThunderLine(start, end, 12, 210, adminPower.ultimateBoltDamage, adminPower.ultimateBoltRadius);
+  summonAdminThunderRing(end, 8, 150, adminPower.ultimateBoltDamage, adminPower.ultimateBoltRadius);
+  burst(start.x, start.y, "#d8ffff", 70);
+  burst(end.x, end.y, "#d8ffff", 80);
+
+  for (const enemy of enemies) {
+    if (enemy.defeated || player.adminBlitzHits.has(enemy)) continue;
+    const pathDistance = distancePointToSegment(enemy, start, end);
+    if (pathDistance > adminPower.ultimateBlitzWidth + enemy.size) continue;
+    player.adminBlitzHits.add(enemy);
+    damageEnemyShieldPierce(enemy, adminPower.ultimateBlitzDamage, 3, "#d8ffff");
+    burst(enemy.x, enemy.y, "#d8ffff", 24);
+    registerEnemyDefeat(enemy);
+  }
+}
+
 function updateAdminCombat(delta) {
   if (player.character !== "admin") return;
 
@@ -1817,7 +1901,8 @@ function updateAdminCombat(delta) {
   if (player.adminBlitzTime > 0) {
     player.invulnerable = Math.max(player.invulnerable, 0.12);
     player.adminBlitzElapsed += delta;
-    const progress = Math.min(1, player.adminBlitzElapsed / adminPower.blitzTravelTime);
+    const duration = player.adminBlitzDuration || adminPower.blitzTravelTime;
+    const progress = Math.min(1, player.adminBlitzElapsed / duration);
     const eased = 1 - Math.pow(1 - progress, 3);
     const start = player.adminBlitzStart;
     const end = player.adminBlitzEnd;
@@ -1833,26 +1918,6 @@ function updateAdminCombat(delta) {
     }
   }
 
-  if (player.ultimateActive > 0) {
-    player.adminRayTick -= delta;
-    if (player.adminRayTick > 0) return;
-    player.adminRayTick = adminPower.rayTickRate;
-
-    const angle = player.facing;
-    for (const enemy of enemies) {
-      if (enemy.defeated) continue;
-      const dx = enemy.x - player.x;
-      const dy = enemy.y - player.y;
-      const dist = Math.hypot(dx, dy);
-      const angleDiff = Math.abs(shortAngle(angle, Math.atan2(dy, dx)));
-      if (dist > adminPower.beamRange + enemy.size || angleDiff > adminPower.rayWidth) continue;
-
-      const damage = enemy.type === "boss" ? adminPower.rayDamage * adminPower.rayBossDamageMultiplier : adminPower.rayDamage;
-      damageEnemy(enemy, damage, "#d8ffff");
-      burst(enemy.x, enemy.y, "#d8ffff", 16);
-      registerEnemyDefeat(enemy);
-    }
-  }
 }
 
 function performDemonSlash() {
@@ -2938,8 +3003,8 @@ function drawAdminBlitzCharge() {
 
 function drawAdminBeam(beam) {
   const alpha = Math.max(0, beam.life / beam.duration);
-  const outerWidth = beam.blitz ? 82 : 30;
-  const innerWidth = beam.blitz ? 26 : 10;
+  const outerWidth = beam.ultimate ? 122 : beam.blitz ? 82 : 30;
+  const innerWidth = beam.ultimate ? 38 : beam.blitz ? 26 : 10;
   ctx.save();
   ctx.translate(beam.x - camera.x, beam.y - camera.y);
   ctx.rotate(beam.angle);
@@ -2947,12 +3012,12 @@ function drawAdminBeam(beam) {
   ctx.lineWidth = outerWidth;
   ctx.lineCap = "round";
   ctx.beginPath();
-  drawLightningBoltPath(beam.range, beam.blitz ? 32 : 18);
+  drawLightningBoltPath(beam.range, beam.ultimate ? 44 : beam.blitz ? 32 : 18);
   ctx.stroke();
   ctx.strokeStyle = `rgba(255, 255, 255, ${0.55 + alpha * 0.35})`;
   ctx.lineWidth = innerWidth;
   ctx.beginPath();
-  drawLightningBoltPath(beam.range, beam.blitz ? 18 : 10);
+  drawLightningBoltPath(beam.range, beam.ultimate ? 26 : beam.blitz ? 18 : 10);
   ctx.stroke();
   ctx.restore();
 }
@@ -2970,19 +3035,15 @@ function drawLightningBoltPath(range, jag) {
 function drawAdminRayOfDoom() {
   const pulse = 0.62 + Math.sin(performance.now() / 48) * 0.2;
   ctx.save();
-  ctx.rotate(player.facing);
   ctx.strokeStyle = `rgba(216, 255, 255, ${pulse * 0.55})`;
-  ctx.lineWidth = 132;
-  ctx.lineCap = "round";
+  ctx.lineWidth = 8;
   ctx.beginPath();
-  ctx.moveTo(18, 0);
-  ctx.lineTo(adminPower.beamRange, 0);
+  ctx.arc(0, 0, 42 + pulse * 16, 0, Math.PI * 2);
   ctx.stroke();
   ctx.strokeStyle = `rgba(255, 255, 255, ${pulse})`;
-  ctx.lineWidth = 42;
+  ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.moveTo(18, 0);
-  ctx.lineTo(adminPower.beamRange, 0);
+  ctx.arc(0, 0, 68 + pulse * 18, 0, Math.PI * 2);
   ctx.stroke();
   ctx.restore();
 }
@@ -3582,7 +3643,7 @@ function drawUltimateHud() {
 
   if (player.ultimateUnlocked) {
     ctx.fillStyle = active ? "rgba(255, 209, 102, 0.42)" : charging ? "rgba(255, 209, 102, 0.35)" : "rgba(143, 183, 255, 0.2)";
-    const activeDuration = player.character === "admin" ? adminPower.rayDuration : player.character === "demon" ? ultimateAbility.demonDuration : player.character === "bat" ? ultimateAbility.batDuration : player.character === "paladin" ? 1.1 : 0.8;
+    const activeDuration = player.character === "admin" ? adminPower.ultimateBlitzTravelTime + 0.65 : player.character === "demon" ? ultimateAbility.demonDuration : player.character === "bat" ? ultimateAbility.batDuration : player.character === "paladin" ? 1.1 : 0.8;
     ctx.fillRect(x + 4, y + 4, (width - 8) * (active ? player.ultimateActive / activeDuration : charging ? chargeProgress : ready ? 1 : 0), height - 8);
   }
 
@@ -3594,7 +3655,7 @@ function drawUltimateHud() {
   ctx.fillStyle = "#f3f0e8";
   ctx.font = "800 13px system-ui, sans-serif";
   ctx.textAlign = "center";
-  const name = player.character === "admin" ? "Ray of Doom" : player.character === "bat" ? "Shield Rush" : player.character === "square" ? "Nine Lines" : player.character === "paladin" ? "Fire Cross" : "Demon Flight";
+  const name = player.character === "admin" ? "Thunder Blitz" : player.character === "bat" ? "Shield Rush" : player.character === "square" ? "Nine Lines" : player.character === "paladin" ? "Fire Cross" : "Demon Flight";
   const label = !player.ultimateUnlocked ? "Ultimate at Boss 2" : active ? name : player.ultimateCooldown > 0 ? `Ultimate ${Math.ceil(player.ultimateCooldown)}` : charging ? "Hold Space" : "Space Ultimate";
   ctx.fillText(label, x + width / 2, y + 17);
   ctx.fillStyle = "#cfc8b8";
