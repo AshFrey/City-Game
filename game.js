@@ -102,11 +102,11 @@ const adminPower = {
   beamLife: 0.16,
   beamCooldown: paladinSword.cooldown * 1.5,
   boltRadius: paladinSlam.radius,
-  boltDamage: 1,
-  boltCooldown: 1.2,
+  boltDamage: 3,
+  boltCooldown: spinAbility.cooldown,
   blitzCooldown: 15,
   blitzWidth: 70,
-  blitzDamage: 12,
+  blitzDamage: 6,
   blitzCharge: 0.16,
   blitzTravelTime: 0.28,
   rayDuration: 2.5,
@@ -1793,7 +1793,7 @@ function startAdminBlitzTravel() {
     const pathDistance = distancePointToSegment(enemy, start, end);
     if (pathDistance > adminPower.blitzWidth + enemy.size) continue;
     player.adminBlitzHits.add(enemy);
-    damageEnemy(enemy, adminPower.blitzDamage, "#d8ffff");
+    damageEnemyShieldPierce(enemy, adminPower.blitzDamage, 3, "#d8ffff");
     burst(enemy.x, enemy.y, "#d8ffff", 16);
     registerEnemyDefeat(enemy);
   }
@@ -2221,6 +2221,24 @@ function damageEnemyHeavy(enemy, amount, shieldColor) {
   enemy.shield = Math.max(0, (enemy.shield || 0) - shieldBlock);
   enemy.health -= amount - shieldBlock;
   burst(enemy.x, enemy.y, shieldColor || "#ffb04a", enemy.shield > 0 ? 10 : 16);
+}
+
+function damageEnemyShieldPierce(enemy, amount, shieldDamage, shieldColor) {
+  enemy.hitCooldown = 0.58;
+  if (guardianPillarsActive() && enemy.type !== "guardianPillar" && enemy.type !== "pillar" && enemy.type !== "boss") {
+    burst(enemy.x, enemy.y, "#73e0d1", 8);
+    return;
+  }
+
+  if (enemy.invincibleShield) {
+    burst(enemy.x, enemy.y, shieldColor || "#ffd166", 10);
+    return;
+  }
+
+  const shieldBlock = Math.min(enemy.shield || 0, shieldDamage);
+  enemy.shield = Math.max(0, (enemy.shield || 0) - shieldBlock);
+  enemy.health -= Math.max(0, amount - shieldBlock);
+  burst(enemy.x, enemy.y, shieldColor || "#d8ffff", 10 + shieldBlock * 2);
 }
 
 function damagePlayer(amount) {
