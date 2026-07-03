@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>City Battle Rival</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="game-shell">
+    <canvas id="game" width="960" height="640" aria-label="City Battle Rival game"></canvas>
+
+    <section id="startScreen" class="overlay">
+      <div class="panel">
+        <h1>City Battle Rival</h1>
+        <p>Choose your fighter and survive the arena.</p>
+        <div class="character-select">
+          <button id="batButton" type="button">Baseball Dude</button>
+          <button id="demonButton" type="button">Demon Dude</button>
+          <button id="squareButton" type="button">Square Dude</button>
+          <button id="paladinButton" type="button">Paladin Dude</button>
+        </div>
+        <div class="lightning-select">
+          <button id="adminButton" type="button" class="admin-button">Lightning Dude</button>
+        </div>
+        <label class="teleport-toggle">
+          <input id="teleportToggle" type="checkbox">
+          <span>Cheat Mode On</span>
+        </label>
+        <div id="teleportMenu" class="teleport-menu hidden">
+          <p>What level do you want to teleport to?</p>
+          <div id="levelSelect" class="level-select">
+            <button type="button" data-level="1">1</button>
+            <button type="button" data-level="2">2</button>
+            <button type="button" data-level="3">3</button>
+            <button type="button" data-level="4">4</button>
+            <button type="button" data-level="5">5</button>
+            <button type="button" data-level="6">6</button>
+            <button type="button" data-level="7">7</button>
+            <button type="button" data-level="8">8</button>
+            <button type="button" data-level="9">9</button>
+            <button type="button" data-level="10">10</button>
+            <button type="button" data-level="11">11</button>
+            <button type="button" data-level="12">12</button>
+            <button type="button" data-level="13">13</button>
+            <button type="button" data-level="14">14</button>
+            <button type="button" data-level="15">15</button>
+          </div>
+          <p id="teleportCharacterPrompt" class="teleport-character-prompt hidden">What dude do you want to play as?</p>
+        </div>
+        <div class="controls">
+          <span>Move: WASD or arrows</span>
+          <span>Attack: left-click</span>
+          <span>Ability: right-click</span>
+          <span>Second ability: E</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="gameOverScreen" class="overlay hidden">
+      <div class="panel">
+        <h1 id="gameOverTitle">Game Over</h1>
+        <p id="gameOverStats"></p>
+        <button id="restartButton" type="button">Restart</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
