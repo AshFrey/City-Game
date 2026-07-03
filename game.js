@@ -2097,6 +2097,10 @@ function findUltimateTarget() {
 function swingBat() {
   if (state !== "playing" || player.swingCooldown > 0 || player.spinTime > 0) return;
 
+  if (aimingWithPointer) {
+    player.facing = Math.atan2(pointerWorld.y - player.y, pointerWorld.x - player.x);
+  }
+
   player.swingTime = bat.duration;
   player.swingCooldown = bat.cooldown;
 
@@ -3077,15 +3081,18 @@ function drawSquareOrbs() {
 }
 
 function drawBat() {
+  const aimAngle = aimingWithPointer
+    ? Math.atan2(pointerWorld.y - player.y, pointerWorld.x - player.x)
+    : player.facing;
   const swingProgress = player.swingTime > 0 ? 1 - player.swingTime / bat.duration : 0;
   const easedSwing = 1 - Math.pow(1 - swingProgress, 3);
-  const swingAngle = player.facing - bat.arc / 2 + bat.arc * easedSwing;
-  const idleAngle = player.facing - Math.PI * 0.06;
+  const swingAngle = aimAngle - bat.arc / 2 + bat.arc * easedSwing;
+  const idleAngle = aimAngle;
   const angle = player.swingTime > 0 ? swingAngle : idleAngle;
 
   if (player.swingTime > 0) {
     ctx.save();
-    ctx.rotate(player.facing);
+    ctx.rotate(aimAngle);
     ctx.strokeStyle = "rgba(244, 189, 75, 0.28)";
     ctx.lineWidth = 18;
     ctx.lineCap = "round";
