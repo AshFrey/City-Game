@@ -95,7 +95,7 @@ const ultimateAbility = {
   adminDuration: 10,
 };
 const adminPower = {
-  maxShield: 50,
+  maxShield: 60,
   shieldRegen: 0,
   beamRange: 760,
   beamWidth: 0.33,
@@ -258,7 +258,7 @@ function resetGame() {
 
   if (selectedCharacter === "admin") {
     player.speed = 315;
-    player.shield = adminPower.maxShield;
+    player.shield = 0;
     player.maxShield = adminPower.maxShield;
   }
 
