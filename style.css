@@ -167,6 +167,11 @@ button:disabled {
   font-weight: 700;
 }
 
+.teleport-menu .cheat-warning {
+  color: #ff6a5f;
+  font-weight: 900;
+}
+
 .level-select {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
