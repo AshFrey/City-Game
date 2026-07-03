@@ -1972,6 +1972,7 @@ function updateDemonBreath(delta) {
 
   player.demonBreathTime = Math.max(0, player.demonBreathTime - delta);
   player.demonBreathAngle = player.facing;
+  spawnDemonBreathParticles();
   player.demonBreathTick -= delta;
   if (player.demonBreathTick > 0) return;
   player.demonBreathTick = demonBreath.tickRate;
@@ -1988,6 +1989,23 @@ function updateDemonBreath(delta) {
     damageEnemy(enemy, demonBreath.damage, "#ff6f32");
     burst(enemy.x, enemy.y, "#ff6f32", 5);
     registerEnemyDefeat(enemy);
+  }
+}
+
+function spawnDemonBreathParticles() {
+  for (let i = 0; i < 4; i += 1) {
+    const angle = player.demonBreathAngle + (Math.random() * 2 - 1) * demonBreath.spread * 0.92;
+    const distanceOut = 26 + Math.random() * (demonBreath.range - 32);
+    const speed = 170 + Math.random() * 130;
+    particles.push({
+      x: player.x + Math.cos(angle) * distanceOut,
+      y: player.y + Math.sin(angle) * distanceOut,
+      vx: Math.cos(angle) * speed * 0.35,
+      vy: Math.sin(angle) * speed * 0.35,
+      life: 0.08 + Math.random() * 0.08,
+      size: 3 + Math.random() * 5,
+      color: Math.random() < 0.35 ? "#ffd166" : "#ff6f32",
+    });
   }
 }
 
