@@ -110,10 +110,11 @@ const adminPower = {
   blitzCharge: 0.16,
   blitzTravelTime: 0.28,
   ultimateBlitzWidth: 110,
-  ultimateBlitzDamage: 18,
-  ultimateBlitzTravelTime: 0.36,
+  ultimateBlitzDamage: 24,
+  ultimateBlitzTravelTime: 0.72,
   ultimateBoltDamage: 5,
   ultimateBoltRadius: paladinSlam.radius * 0.9,
+  ultimateStormTickRate: 0.08,
   rayDuration: 2.5,
   rayWidth: 1.65,
   rayDamage: 5,
@@ -256,6 +257,8 @@ function resetGame() {
     adminBlitzAngle: 0,
     adminBlitzElapsed: 0,
     adminBlitzDuration: adminPower.blitzTravelTime,
+    adminBlitzPath: null,
+    adminUltimateBlitz: false,
     adminBlitzHits: new Set(),
     adminBlitzTick: 0,
     adminRayTick: 0,
@@ -1812,6 +1815,8 @@ function activateAdminBlitz() {
   player.adminBlitzAngle = angle;
   player.adminBlitzElapsed = 0;
   player.adminBlitzDuration = adminPower.blitzTravelTime;
+  player.adminBlitzPath = null;
+  player.adminUltimateBlitz = false;
   player.adminBlitzHits = new Set();
   player.barrelCooldown = adminPower.blitzCooldown;
   player.invulnerable = Math.max(player.invulnerable, adminPower.blitzCharge + adminPower.blitzTravelTime + 0.15);
@@ -1826,6 +1831,8 @@ function startAdminBlitzTravel() {
   player.adminBlitzTime = adminPower.blitzTravelTime;
   player.adminBlitzElapsed = 0;
   player.adminBlitzDuration = adminPower.blitzTravelTime;
+  player.adminBlitzPath = null;
+  player.adminUltimateBlitz = false;
   adminBeams.push({
     x: start.x,
     y: start.y,
@@ -1853,22 +1860,37 @@ function activateAdminUltimateBlitz() {
 
   const start = { x: player.x, y: player.y };
   const angle = Math.atan2(pointerWorld.y - player.y, pointerWorld.x - player.x);
-  const end = findBlitzEndPoint(angle);
+  const path = findBlitzBouncePath(start, angle);
+  const first = path.first;
+  const end = path.second;
   player.facing = angle;
   player.adminBlitzStart = start;
   player.adminBlitzEnd = end;
   player.adminBlitzAngle = angle;
   player.adminBlitzElapsed = 0;
   player.adminBlitzDuration = adminPower.ultimateBlitzTravelTime;
+  player.adminBlitzPath = path;
+  player.adminUltimateBlitz = true;
   player.adminBlitzTime = adminPower.ultimateBlitzTravelTime;
   player.adminBlitzHits = new Set();
+  player.adminRayTick = 0;
   player.invulnerable = Math.max(player.invulnerable, adminPower.ultimateBlitzTravelTime + 0.35);
 
   adminBeams.push({
     x: start.x,
     y: start.y,
     angle,
-    range: distance(start, end),
+    range: distance(start, first),
+    life: adminPower.ultimateBlitzTravelTime + 0.22,
+    duration: adminPower.ultimateBlitzTravelTime + 0.22,
+    blitz: true,
+    ultimate: true,
+  });
+  adminBeams.push({
+    x: first.x,
+    y: first.y,
+    angle: path.reflectedAngle,
+    range: distance(first, end),
     life: adminPower.ultimateBlitzTravelTime + 0.22,
     duration: adminPower.ultimateBlitzTravelTime + 0.22,
     blitz: true,
@@ -1876,15 +1898,19 @@ function activateAdminUltimateBlitz() {
   });
 
   summonAdminThunderRing(start, 8, 150, adminPower.ultimateBoltDamage, adminPower.ultimateBoltRadius);
-  summonAdminThunderLine(start, end, 12, 210, adminPower.ultimateBoltDamage, adminPower.ultimateBoltRadius);
+  summonAdminThunderLine(start, first, 8, 210, adminPower.ultimateBoltDamage, adminPower.ultimateBoltRadius);
+  summonAdminThunderRing(first, 8, 150, adminPower.ultimateBoltDamage, adminPower.ultimateBoltRadius);
+  summonAdminThunderLine(first, end, 8, 210, adminPower.ultimateBoltDamage, adminPower.ultimateBoltRadius);
   summonAdminThunderRing(end, 8, 150, adminPower.ultimateBoltDamage, adminPower.ultimateBoltRadius);
   burst(start.x, start.y, "#d8ffff", 70);
+  burst(first.x, first.y, "#d8ffff", 90);
   burst(end.x, end.y, "#d8ffff", 80);
 
   for (const enemy of enemies) {
     if (enemy.defeated || player.adminBlitzHits.has(enemy)) continue;
-    const pathDistance = distancePointToSegment(enemy, start, end);
-    if (pathDistance > adminPower.ultimateBlitzWidth + enemy.size) continue;
+    const firstDistance = distancePointToSegment(enemy, start, first);
+    const secondDistance = distancePointToSegment(enemy, first, end);
+    if (Math.min(firstDistance, secondDistance) > adminPower.ultimateBlitzWidth + enemy.size) continue;
     player.adminBlitzHits.add(enemy);
     damageEnemyShieldPierce(enemy, adminPower.ultimateBlitzDamage, 3, "#d8ffff");
     burst(enemy.x, enemy.y, "#d8ffff", 24);
@@ -1916,13 +1942,29 @@ function updateAdminCombat(delta) {
     const start = player.adminBlitzStart;
     const end = player.adminBlitzEnd;
     if (start && end) {
-      player.x = start.x + (end.x - start.x) * eased;
-      player.y = start.y + (end.y - start.y) * eased;
+      if (player.adminBlitzPath) {
+        const position = pointOnBlitzPath(player.adminBlitzPath, eased);
+        player.x = position.x;
+        player.y = position.y;
+        player.facing = position.angle;
+      } else {
+        player.x = start.x + (end.x - start.x) * eased;
+        player.y = start.y + (end.y - start.y) * eased;
+      }
       if (Math.random() < 0.9) burst(player.x, player.y, "#d8ffff", 4);
+      if (player.adminUltimateBlitz) {
+        player.adminRayTick -= delta;
+        if (player.adminRayTick <= 0) {
+          player.adminRayTick = adminPower.ultimateStormTickRate;
+          summonAdminThunderRing({ x: player.x, y: player.y }, 3, 92, adminPower.ultimateBoltDamage, adminPower.ultimateBoltRadius * 0.7);
+        }
+      }
       if (progress >= 1) {
         player.x = end.x;
         player.y = end.y;
         player.adminBlitzTime = 0;
+        player.adminBlitzPath = null;
+        player.adminUltimateBlitz = false;
       }
     }
   }
@@ -2642,20 +2684,73 @@ function distance(a, b) {
 }
 
 function findBlitzEndPoint(angle) {
+  return findBlitzEndPointFrom(player, angle);
+}
+
+function findBlitzEndPointFrom(origin, angle) {
   const margin = player.size;
   const dx = Math.cos(angle);
   const dy = Math.sin(angle);
   const distances = [];
 
-  if (dx > 0) distances.push((world.width - margin - player.x) / dx);
-  if (dx < 0) distances.push((margin - player.x) / dx);
-  if (dy > 0) distances.push((world.height - margin - player.y) / dy);
-  if (dy < 0) distances.push((margin - player.y) / dy);
+  if (dx > 0) distances.push((world.width - margin - origin.x) / dx);
+  if (dx < 0) distances.push((margin - origin.x) / dx);
+  if (dy > 0) distances.push((world.height - margin - origin.y) / dy);
+  if (dy < 0) distances.push((margin - origin.y) / dy);
 
   const travel = Math.max(0, Math.min(...distances.filter((value) => value > 0)));
   return {
-    x: Math.max(margin, Math.min(world.width - margin, player.x + dx * travel)),
-    y: Math.max(margin, Math.min(world.height - margin, player.y + dy * travel)),
+    x: Math.max(margin, Math.min(world.width - margin, origin.x + dx * travel)),
+    y: Math.max(margin, Math.min(world.height - margin, origin.y + dy * travel)),
+  };
+}
+
+function findBlitzBouncePath(start, angle) {
+  const first = findBlitzEndPointFrom(start, angle);
+  const margin = player.size;
+  const onVerticalWall = first.x <= margin + 0.5 || first.x >= world.width - margin - 0.5;
+  const onHorizontalWall = first.y <= margin + 0.5 || first.y >= world.height - margin - 0.5;
+  let reflectedAngle = angle;
+
+  if (onVerticalWall) reflectedAngle = Math.PI - reflectedAngle;
+  if (onHorizontalWall) reflectedAngle = -reflectedAngle;
+
+  const bounceStart = {
+    x: Math.max(margin, Math.min(world.width - margin, first.x + Math.cos(reflectedAngle) * 2)),
+    y: Math.max(margin, Math.min(world.height - margin, first.y + Math.sin(reflectedAngle) * 2)),
+  };
+  const second = findBlitzEndPointFrom(bounceStart, reflectedAngle);
+  const firstLength = distance(start, first);
+  const secondLength = distance(first, second);
+
+  return {
+    start,
+    first,
+    second,
+    angle,
+    reflectedAngle,
+    firstLength,
+    secondLength,
+    totalLength: firstLength + secondLength || 1,
+  };
+}
+
+function pointOnBlitzPath(path, progress) {
+  const targetDistance = path.totalLength * progress;
+  if (targetDistance <= path.firstLength) {
+    const t = path.firstLength > 0 ? targetDistance / path.firstLength : 1;
+    return {
+      x: path.start.x + (path.first.x - path.start.x) * t,
+      y: path.start.y + (path.first.y - path.start.y) * t,
+      angle: path.angle,
+    };
+  }
+
+  const t = path.secondLength > 0 ? (targetDistance - path.firstLength) / path.secondLength : 1;
+  return {
+    x: path.first.x + (path.second.x - path.first.x) * Math.min(1, t),
+    y: path.first.y + (path.second.y - path.first.y) * Math.min(1, t),
+    angle: path.reflectedAngle,
   };
 }
 
