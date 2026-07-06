@@ -86,6 +86,8 @@ const demonFireball = {
   size: 15,
   life: 2.7,
   damage: 2,
+  explosionRadius: 74,
+  explosionDamage: 1.5,
 };
 const ultimateAbility = {
   chargeTime: 1.5,
@@ -1389,8 +1391,7 @@ function updateProjectiles(delta) {
         projectile.wallBounces -= 1;
         burst(projectile.x, projectile.y, projectile.burstColor || "#f4bd4b", 7);
       } else if (hitWallX || hitWallY) {
-        projectile.life = 0;
-        burst(projectile.x, projectile.y, projectile.burstColor || "#f4bd4b", 8);
+        destroyProjectile(projectile);
       } else {
         projectile.x = nextX;
         projectile.y = nextY;
@@ -1419,11 +1420,13 @@ function updateProjectiles(delta) {
         const hitColor = projectile.burstColor || "#f4bd4b";
         damageEnemy(enemy, projectile.enemyDamage || 1, hitColor);
         registerEnemyDefeat(enemy);
-        if (projectile.coneExplosion) explodeDemonFireballCone(projectile, enemy);
-        projectile.life = 0;
-        burst(projectile.x, projectile.y, hitColor, 10);
+        destroyProjectile(projectile);
         break;
       }
+    }
+
+    if (projectile.explodesOnDeath && projectile.life <= 0 && !projectile.exploded) {
+      destroyProjectile(projectile);
     }
 
     if (!projectile.friendly && projectile.life > 0 && distance(projectile, player) < projectile.size + player.size * 0.65) {
@@ -1437,6 +1440,16 @@ function updateProjectiles(delta) {
   }
 
   projectiles = projectiles.filter((projectile) => projectile.life > 0);
+}
+
+function destroyProjectile(projectile) {
+  if (projectile.explodesOnDeath && !projectile.exploded) {
+    projectile.exploded = true;
+    explodeDemonFireball(projectile);
+  } else {
+    burst(projectile.x, projectile.y, projectile.burstColor || "#f4bd4b", 8);
+  }
+  projectile.life = 0;
 }
 
 function throwBarrel() {
@@ -2066,7 +2079,7 @@ function shootDemonFireball() {
     friendly: true,
     enemyDamage: demonFireball.damage,
     wallBounces: 1,
-    coneExplosion: true,
+    explodesOnDeath: true,
     color: "#ff6f32",
     burstColor: "#ff6f32",
   });
@@ -2074,41 +2087,23 @@ function shootDemonFireball() {
   burst(player.x, player.y, "#ff9b3f", 14);
 }
 
-function explodeDemonFireballCone(projectile, hitEnemy) {
-  const angle = Math.atan2(projectile.vy, projectile.vx);
-  const range = 62;
-  const arc = Math.PI * 0.68;
-  const center = {
-    x: hitEnemy.x + Math.cos(angle) * 38,
-    y: hitEnemy.y + Math.sin(angle) * 38,
-  };
-
-  burst(center.x, center.y, "#ff9b3f", 20);
-  for (let i = 0; i < 7; i += 1) {
-    const stepAngle = angle + (Math.random() - 0.5) * arc;
-    const forward = 16 + Math.random() * range;
-    fires.push({
-      x: hitEnemy.x + Math.cos(stepAngle) * forward,
-      y: hitEnemy.y + Math.sin(stepAngle) * forward,
-      radius: 18 + Math.random() * 10,
-      life: 0.85,
-      tick: 0,
-      tickRate: 0.24,
-      damage: 0.45,
-      damageColor: "#ff6f32",
-    });
-  }
+function explodeDemonFireball(projectile) {
+  burst(projectile.x, projectile.y, "#ff9b3f", 34);
+  fires.push({
+    x: projectile.x,
+    y: projectile.y,
+    radius: demonFireball.explosionRadius,
+    life: 0.95,
+    tick: 0,
+    tickRate: 0.22,
+    damage: 0.6,
+    damageColor: "#ff6f32",
+  });
 
   for (const enemy of enemies) {
-    if (enemy.defeated || enemy === hitEnemy) continue;
-    const dx = enemy.x - hitEnemy.x;
-    const dy = enemy.y - hitEnemy.y;
-    const dist = Math.hypot(dx, dy);
-    const angleToEnemy = Math.atan2(dy, dx);
-    const angleDiff = Math.abs(shortAngle(angle, angleToEnemy));
-    if (dist > range + enemy.size || angleDiff > arc / 2) continue;
-    damageEnemy(enemy, 1, "#ff6f32");
-    burst(enemy.x, enemy.y, "#ff6f32", 8);
+    if (enemy.defeated || distance(projectile, enemy) > demonFireball.explosionRadius + enemy.size) continue;
+    damageEnemy(enemy, demonFireball.explosionDamage, "#ff6f32");
+    burst(enemy.x, enemy.y, "#ff6f32", 10);
     registerEnemyDefeat(enemy);
   }
 }
