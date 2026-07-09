@@ -63,6 +63,23 @@ const squareTrail = {
   dropRate: 0.1,
   damage: 0.25,
 };
+const squareMinion = {
+  maxHealth: 15,
+  speed: 245,
+  bombSpeed: 285,
+  size: 18,
+  homeRadius: 30,
+  fightRadius: 105,
+  maxAdvanceRadius: 88,
+  guardRadius: 180,
+  range: 48,
+  keepEnemyDistance: 52,
+  damage: 1,
+  attackCooldown: 0.72,
+  enemyContactDamage: 7.5,
+  enemyContactCooldown: 0.8,
+  bombFuse: 4.2,
+};
 const demonSlash = {
   range: 92,
   arc: Math.PI * 0.86,
@@ -128,6 +145,7 @@ let player;
 let enemies;
 let projectiles;
 let squareShots;
+let squareMinions;
 let barrels;
 let fires;
 let pickups;
@@ -276,6 +294,7 @@ function resetGame() {
   enemies = [];
   projectiles = [];
   squareShots = [];
+  squareMinions = [];
   barrels = [];
   fires = [];
   pickups = [];
@@ -644,6 +663,7 @@ function update(delta) {
   updateEnemies(delta);
   updateProjectiles(delta);
   updateSquareShots(delta);
+  updateSquareMinions(delta);
   updateBarrels(delta);
   updateFires(delta);
   updateSquareOrbs(delta);
@@ -737,12 +757,7 @@ function activateUltimate() {
     player.shield = Math.min(player.maxShield, player.shield + 28);
     burst(player.x, player.y, "#8fb7ff", 32);
   } else if (player.character === "square") {
-    player.ultimateActive = 0.8;
-    const count = 9;
-    for (let i = 0; i < count; i += 1) {
-      fireSquareShot((Math.PI * 2 * i) / count, 3, 24, "#d37cff", Infinity, true, 1 / 3);
-    }
-    burst(player.x, player.y, "#d37cff", 38);
+    activateSquareUltimate();
   } else if (player.character === "demon") {
     player.ultimateActive = ultimateAbility.demonDuration;
     player.invulnerable = Math.max(player.invulnerable, ultimateAbility.demonDuration);
@@ -826,8 +841,9 @@ function updateEnemies(delta) {
     enemy.chargeTime = Math.max(0, (enemy.chargeTime || 0) - delta);
     enemy.jumpCooldown = Math.max(0, (enemy.jumpCooldown || 0) - delta);
     enemy.jumpTime = Math.max(0, (enemy.jumpTime || 0) - delta);
-    const angle = Math.atan2(player.y - enemy.y, player.x - enemy.x);
-    const enemyDistance = distance(enemy, player);
+    const target = getEnemyPreferredTarget(enemy);
+    const angle = Math.atan2(target.y - enemy.y, target.x - enemy.x);
+    const enemyDistance = distance(enemy, target);
     const wantsRange = (enemy.type === "shooter" || enemy.type === "beam") && enemyDistance < 360;
     const isBound = enemy.boundTime > 0;
     const protectionSlow = guardianPillarsActive() && enemy.type !== "guardianPillar" && enemy.type !== "pillar" ? 0.5 : 1;
@@ -844,11 +860,11 @@ function updateEnemies(delta) {
     }
 
     if (enemy.type === "slugger") {
-      updateSluggerAttack(enemy, angle, enemyDistance);
+      updateSluggerAttack(enemy, angle, enemyDistance, target);
     }
 
     if (enemy.type === "beam") {
-      updateBeamEnemy(enemy, angle, enemyDistance);
+      updateBeamEnemy(enemy, angle, enemyDistance, target);
     }
 
     if (!isBound && enemy.type === "teleporter") {
@@ -868,7 +884,10 @@ function updateEnemies(delta) {
       updateChargerEnemy(enemy, angle, delta);
     }
 
-    if (distance(enemy, player) < enemy.size + player.size * 0.72 && enemy.hitCooldown <= 0) {
+    if (target !== player && distance(enemy, target) < enemy.size + squareMinion.size * 0.72 && enemy.hitCooldown <= 0) {
+      enemy.hitCooldown = 0.72;
+      damageSquareMinion(target, 11);
+    } else if (distance(enemy, player) < enemy.size + player.size * 0.72 && enemy.hitCooldown <= 0) {
       enemy.hitCooldown = 0.72;
       if (player.invulnerable <= 0) {
         damagePlayer(11);
@@ -880,6 +899,24 @@ function updateEnemies(delta) {
 
   enemies = enemies.filter((enemy) => !enemy.defeated);
   updateFinalBossShield();
+}
+
+function getEnemyPreferredTarget(enemy) {
+  if (!squareMinions || squareMinions.length === 0) return player;
+  const playerDistance = distance(enemy, player);
+  if (playerDistance < 260) return player;
+
+  let closestMinion = null;
+  let closestDistance = Infinity;
+  for (const minion of squareMinions) {
+    const d = distance(enemy, minion);
+    if (d < closestDistance) {
+      closestDistance = d;
+      closestMinion = minion;
+    }
+  }
+
+  return closestMinion && closestDistance < playerDistance * 0.85 ? closestMinion : player;
 }
 
 function updatePillar(pillar, delta) {
@@ -965,7 +1002,7 @@ function updateChargerEnemy(enemy, angle, delta) {
   }
 }
 
-function updateBeamEnemy(enemy, angle, enemyDistance) {
+function updateBeamEnemy(enemy, angle, enemyDistance, target = player) {
   if (enemy.beamTime <= 0 && enemy.beamCooldown <= 0 && enemyDistance < 520) {
     enemy.beamTime = 0.72;
     enemy.beamAngle = angle;
@@ -975,9 +1012,11 @@ function updateBeamEnemy(enemy, angle, enemyDistance) {
 
   if (enemy.beamTime > 0 && enemy.beamTime < 0.18 && !enemy.beamHit) {
     enemy.beamHit = true;
-    const angleToPlayer = Math.atan2(player.y - enemy.y, player.x - enemy.x);
-    const angleDiff = Math.abs(shortAngle(enemy.beamAngle, angleToPlayer));
-    if (enemyDistance < 560 && angleDiff < 0.11 && player.invulnerable <= 0) {
+    const angleToTarget = Math.atan2(target.y - enemy.y, target.x - enemy.x);
+    const angleDiff = Math.abs(shortAngle(enemy.beamAngle, angleToTarget));
+    if (target !== player && enemyDistance < 560 && angleDiff < 0.11) {
+      damageSquareMinion(target, 18);
+    } else if (enemyDistance < 560 && angleDiff < 0.11 && player.invulnerable <= 0) {
       damagePlayer(18);
       player.invulnerable = 0.42;
       burst(player.x, player.y, "#df6659", 10);
@@ -997,7 +1036,7 @@ function updateTeleporterEnemy(enemy) {
   burst(enemy.x, enemy.y, "#73e0d1", 12);
 }
 
-function updateSluggerAttack(enemy, angle, enemyDistance) {
+function updateSluggerAttack(enemy, angle, enemyDistance, target = player) {
   if (enemyDistance < 92 && enemy.attackCooldown <= 0) {
     enemy.swingTime = 0.34;
     enemy.swingHit = false;
@@ -1007,10 +1046,12 @@ function updateSluggerAttack(enemy, angle, enemyDistance) {
   const swingProgress = enemy.swingTime > 0 ? 1 - enemy.swingTime / 0.34 : 0;
   if (enemy.swingTime > 0 && !enemy.swingHit && swingProgress > 0.42) {
     enemy.swingHit = true;
-    const angleToPlayer = Math.atan2(player.y - enemy.y, player.x - enemy.x);
-    const angleDiff = Math.abs(shortAngle(angle, angleToPlayer));
+    const angleToTarget = Math.atan2(target.y - enemy.y, target.x - enemy.x);
+    const angleDiff = Math.abs(shortAngle(angle, angleToTarget));
 
-    if (enemyDistance < 90 && angleDiff < Math.PI * 0.42 && player.invulnerable <= 0) {
+    if (target !== player && enemyDistance < 90 && angleDiff < Math.PI * 0.42) {
+      damageSquareMinion(target, 17);
+    } else if (enemyDistance < 90 && angleDiff < Math.PI * 0.42 && player.invulnerable <= 0) {
       damagePlayer(17);
       player.invulnerable = 0.46;
       burst(player.x, player.y, "#df6659", 12);
@@ -1437,6 +1478,16 @@ function updateProjectiles(delta) {
         burst(player.x, player.y, "#df6659", 8);
       }
     }
+
+    if (!projectile.friendly && projectile.life > 0) {
+      for (const minion of squareMinions) {
+        if (distance(projectile, minion) > projectile.size + squareMinion.size * 0.65) continue;
+        projectile.life = 0;
+        damageSquareMinion(minion, projectile.damage);
+        burst(minion.x, minion.y, "#e7c4ff", 8);
+        break;
+      }
+    }
   }
 
   projectiles = projectiles.filter((projectile) => projectile.life > 0);
@@ -1639,18 +1690,228 @@ function dropSquareShotTrail(shot, delta) {
     damage: squareTrail.damage,
     damageColor: "#d37cff",
     type: "squareTrail",
-    affectsBosses: false,
   });
   shot.trailTimer = 0.06;
 }
 
 function activateSquareSpin() {
-  if (player.character !== "square" || !player.spinUnlocked || state !== "playing" || player.spinCooldown > 0 || player.spinTime > 0) return;
+  if (player.character !== "square" || !player.spinUnlocked || state !== "playing" || player.spinCooldown > 0 || player.squareOrbs.length === 0) return;
 
-  player.spinTime = spinAbility.duration;
+  player.squareOrbs.pop();
   player.spinCooldown = spinAbility.cooldown;
-  player.spinTick = 0;
-  burst(player.x, player.y, "#b66ad7", 18);
+  player.squareRegen = Math.min(player.squareRegen, 1.6);
+  createSquareTrailField(player.x, player.y);
+  burst(player.x, player.y, "#b66ad7", 22);
+}
+
+function createSquareTrailField(x = player.x, y = player.y) {
+  const patches = 10;
+  const duration = 2.7;
+  fires.push({
+    x,
+    y,
+    radius: 54,
+    life: duration,
+    duration,
+    tick: 0,
+    tickRate: barrelAbility.fireTickRate,
+    damage: squareTrail.damage,
+    damageColor: "#d37cff",
+    type: "squareTrail",
+  });
+
+  for (let i = 0; i < patches; i += 1) {
+    const angle = (Math.PI * 2 * i) / patches + player.squareOrbit * 0.2;
+    const radius = i % 2 === 0 ? 72 : 114;
+    fires.push({
+      x: x + Math.cos(angle) * radius,
+      y: y + Math.sin(angle) * radius,
+      radius: 42,
+      life: duration,
+      duration,
+      tick: 0,
+      tickRate: barrelAbility.fireTickRate,
+      damage: squareTrail.damage,
+      damageColor: "#d37cff",
+      type: "squareTrail",
+    });
+  }
+}
+
+function activateSquareUltimate() {
+  const spent = player.squareOrbs.length;
+  player.squareOrbs = [];
+  player.squareRegen = Math.min(player.squareRegen, 1.8);
+  player.ultimateActive = 0.8;
+
+  const count = spent * 2;
+  for (let i = 0; i < count; i += 1) {
+    const angle = player.facing + (Math.PI * 2 * i) / Math.max(1, count);
+    const radius = 34 + (i % 3) * 16;
+    summonSquareMinion(player.x + Math.cos(angle) * radius, player.y + Math.sin(angle) * radius, { explosive: true });
+  }
+  burst(player.x, player.y, "#d37cff", 26 + count * 5);
+}
+
+function summonSquareMinion(x, y, options = {}) {
+  const orbitOffset = Math.random() * Math.PI * 2;
+  squareMinions.push({
+    x: Math.max(squareMinion.size, Math.min(world.width - squareMinion.size, x)),
+    y: Math.max(squareMinion.size, Math.min(world.height - squareMinion.size, y)),
+    health: squareMinion.maxHealth,
+    attackCooldown: 0.18,
+    hitCooldown: 0,
+    swingTime: 0,
+    facing: player.facing,
+    orbitOffset,
+    explosive: Boolean(options.explosive),
+    fuse: options.explosive ? squareMinion.bombFuse : 0,
+  });
+}
+
+function updateSquareMinions(delta) {
+  const targetClaims = new Map();
+  for (let i = 0; i < squareMinions.length; i += 1) {
+    const minion = squareMinions[i];
+    minion.attackCooldown = Math.max(0, minion.attackCooldown - delta);
+    minion.hitCooldown = Math.max(0, minion.hitCooldown - delta);
+    minion.swingTime = Math.max(0, minion.swingTime - delta);
+    if (minion.explosive) minion.fuse -= delta;
+
+    const target = findSquareMinionTarget(minion, targetClaims);
+    if (target) targetClaims.set(target, (targetClaims.get(target) || 0) + 1);
+    let destination = getSquareMinionHome(minion, i);
+
+    if (target) {
+      const dx = target.x - minion.x;
+      const dy = target.y - minion.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const enemyPlayerDistance = distance(target, player);
+      minion.facing = Math.atan2(dy, dx);
+
+      if (minion.explosive && dist <= squareMinion.range + target.size * 0.45) {
+        explodeSquareMinion(minion);
+        continue;
+      }
+
+      if (!minion.explosive && dist <= squareMinion.range && minion.attackCooldown <= 0) {
+        minion.attackCooldown = squareMinion.attackCooldown;
+        minion.swingTime = 0.22;
+        damageEnemy(target, squareMinion.damage, "#d37cff");
+        burst(target.x, target.y, "#d37cff", 7);
+        registerEnemyDefeat(target);
+      }
+
+      if (minion.explosive) {
+        destination = { x: target.x, y: target.y };
+      } else if (enemyPlayerDistance <= squareMinion.fightRadius + target.size) {
+        const awayX = dist > 0 ? (minion.x - target.x) / dist : Math.cos(minion.orbitOffset);
+        const awayY = dist > 0 ? (minion.y - target.y) / dist : Math.sin(minion.orbitOffset);
+        destination = clampToSquareFightRadius({
+          x: target.x + awayX * squareMinion.keepEnemyDistance,
+          y: target.y + awayY * squareMinion.keepEnemyDistance,
+        });
+      } else {
+        const angleToThreat = Math.atan2(target.y - player.y, target.x - player.x);
+        destination = {
+          x: player.x + Math.cos(angleToThreat) * squareMinion.homeRadius,
+          y: player.y + Math.sin(angleToThreat) * squareMinion.homeRadius,
+        };
+      }
+    }
+
+    if (minion.explosive && minion.fuse <= 0) {
+      explodeSquareMinion(minion);
+      continue;
+    }
+
+    const homeDistance = distance(minion, destination);
+    if (homeDistance > 4) {
+      const dx = destination.x - minion.x;
+      const dy = destination.y - minion.y;
+      const length = Math.hypot(dx, dy) || 1;
+      const speed = minion.explosive ? squareMinion.bombSpeed : squareMinion.speed;
+      moveSquareMinion(minion, minion.x + (dx / length) * speed * delta, minion.y + (dy / length) * speed * delta);
+    }
+
+    for (const enemy of enemies) {
+      if (enemy.defeated || minion.hitCooldown > 0 || distance(minion, enemy) > squareMinion.size + enemy.size * 0.62) continue;
+      minion.health -= squareMinion.enemyContactDamage;
+      minion.hitCooldown = squareMinion.enemyContactCooldown;
+      burst(minion.x, minion.y, "#e7c4ff", 7);
+    }
+  }
+
+  squareMinions = squareMinions.filter((minion) => {
+    if (minion.exploded) return false;
+    if (minion.health > 0) return true;
+    burst(minion.x, minion.y, "#b66ad7", 14);
+    return false;
+  });
+}
+
+function explodeSquareMinion(minion) {
+  if (minion.exploded) return;
+  minion.exploded = true;
+  minion.health = 0;
+  createSquareTrailField(minion.x, minion.y);
+  burst(minion.x, minion.y, "#d37cff", 28);
+}
+
+function findSquareMinionTarget(minion, targetClaims = new Map()) {
+  let target = null;
+  let closest = Infinity;
+  for (const enemy of enemies) {
+    if (enemy.defeated) continue;
+    if (minion.explosive && isEnemyProtectedByPillars(enemy)) continue;
+    if (!minion.explosive && distance(enemy, player) > squareMinion.guardRadius + enemy.size) continue;
+    const claimPenalty = minion.explosive ? 0 : (targetClaims.get(enemy) || 0) * 120;
+    const d = distance(minion, enemy) + claimPenalty;
+    if (d < closest) {
+      closest = d;
+      target = enemy;
+    }
+  }
+  return target;
+}
+
+function isEnemyProtectedByPillars(enemy) {
+  return guardianPillarsActive() && enemy.type !== "guardianPillar" && enemy.type !== "pillar" && enemy.type !== "boss";
+}
+
+function getSquareMinionHome(minion, index) {
+  const count = Math.max(1, squareMinions.length);
+  const angle = player.squareOrbit * 0.55 + minion.orbitOffset + (Math.PI * 2 * index) / count;
+  return {
+    x: player.x + Math.cos(angle) * squareMinion.homeRadius,
+    y: player.y + Math.sin(angle) * squareMinion.homeRadius,
+  };
+}
+
+function clampToSquareFightRadius(point) {
+  const dx = point.x - player.x;
+  const dy = point.y - player.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist <= squareMinion.maxAdvanceRadius) return point;
+  const scale = squareMinion.maxAdvanceRadius / (dist || 1);
+  return {
+    x: player.x + dx * scale,
+    y: player.y + dy * scale,
+  };
+}
+
+function damageSquareMinion(minion, amount) {
+  if (!minion || minion.health <= 0) return;
+  minion.health -= amount;
+  minion.hitCooldown = Math.max(minion.hitCooldown || 0, 0.35);
+  burst(minion.x, minion.y, "#e7c4ff", 7);
+}
+
+function moveSquareMinion(minion, x, y) {
+  const clampedX = Math.max(squareMinion.size, Math.min(world.width - squareMinion.size, x));
+  const clampedY = Math.max(squareMinion.size, Math.min(world.height - squareMinion.size, y));
+  if (!collidesWithBuilding(clampedX, minion.y, squareMinion.size * 0.55)) minion.x = clampedX;
+  if (!collidesWithBuilding(minion.x, clampedY, squareMinion.size * 0.55)) minion.y = clampedY;
 }
 
 function updateBarrels(delta) {
@@ -2786,6 +3047,7 @@ function draw() {
   for (const projectile of projectiles) drawProjectile(projectile);
   for (const beam of adminBeams) drawAdminBeam(beam);
   for (const bolt of thunderbolts) drawThunderbolt(bolt);
+  for (const minion of squareMinions) drawSquareMinion(minion);
   for (const enemy of enemies) drawEnemy(enemy);
   drawPlayer();
   drawHud();
@@ -3256,6 +3518,41 @@ function drawSquareOrbs() {
     ctx.fillRect(-4, -4, 8, 8);
     ctx.restore();
   }
+}
+
+function drawSquareMinion(minion) {
+  ctx.save();
+  ctx.translate(minion.x - camera.x, minion.y - camera.y);
+  ctx.fillStyle = minion.hitCooldown > 0 ? "#f0d7ff" : minion.explosive ? "#d37cff" : "#8f48c7";
+  ctx.fillRect(-squareMinion.size / 2, -squareMinion.size / 2, squareMinion.size, squareMinion.size);
+  ctx.fillStyle = "#e7c4ff";
+  ctx.fillRect(-5, -5, 10, 10);
+
+  if (minion.explosive) {
+    const pulse = 0.45 + Math.sin(performance.now() / 70) * 0.18;
+    ctx.strokeStyle = `rgba(211, 124, 255, ${pulse + 0.3})`;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(0, 0, 16 + pulse * 8, 0, Math.PI * 2);
+    ctx.stroke();
+  } else {
+    ctx.save();
+    ctx.rotate(minion.facing);
+    const swing = minion.swingTime > 0 ? 1 - minion.swingTime / 0.22 : 0;
+    ctx.rotate(minion.swingTime > 0 ? -0.45 + swing * 0.9 : -0.12);
+    ctx.fillStyle = "#d37cff";
+    ctx.fillRect(8, -3, 34, 6);
+    ctx.fillStyle = "#f0d7ff";
+    ctx.fillRect(36, -5, 8, 10);
+    ctx.restore();
+  }
+
+  const healthRatio = Math.max(0, minion.health / squareMinion.maxHealth);
+  ctx.fillStyle = "rgba(12, 13, 15, 0.65)";
+  ctx.fillRect(-13, -19, 26, 4);
+  ctx.fillStyle = "#b66ad7";
+  ctx.fillRect(-13, -19, 26 * healthRatio, 4);
+  ctx.restore();
 }
 
 function drawBat() {
@@ -3772,7 +4069,7 @@ function drawUltimateHud() {
   ctx.fillStyle = "#f3f0e8";
   ctx.font = "800 13px system-ui, sans-serif";
   ctx.textAlign = "center";
-  const name = player.character === "admin" ? "Thunder Blitz" : player.character === "bat" ? "Shield Rush" : player.character === "square" ? "Nine Lines" : player.character === "paladin" ? "Fire Cross" : "Demon Flight";
+  const name = player.character === "admin" ? "Thunder Blitz" : player.character === "bat" ? "Shield Rush" : player.character === "square" ? "Summon Squad" : player.character === "paladin" ? "Fire Cross" : "Demon Flight";
   const label = !player.ultimateUnlocked ? "Ultimate at Boss 2" : active ? name : player.ultimateCooldown > 0 ? `Ultimate ${Math.ceil(player.ultimateCooldown)}` : charging ? "Hold Space" : "Space Ultimate";
   ctx.fillText(label, x + width / 2, y + 17);
   ctx.fillStyle = "#cfc8b8";
@@ -3877,7 +4174,7 @@ function drawSpinHud() {
   ctx.fillStyle = "#cfc8b8";
   ctx.font = "700 13px system-ui, sans-serif";
   ctx.fillText(player.spinUnlocked ? "Right-click" : "Defeat", x + size + 10, y + 24);
-  const spinLabel = player.character === "admin" ? "Bolt" : player.character === "square" ? "Orbit" : player.character === "demon" ? "Breath" : player.character === "paladin" ? "Slam" : "Spin";
+  const spinLabel = player.character === "admin" ? "Bolt" : player.character === "square" ? "Trail Field" : player.character === "demon" ? "Breath" : player.character === "paladin" ? "Slam" : "Spin";
   ctx.fillText(player.spinUnlocked ? spinLabel : "Shield", x + size + 10, y + 43);
 }
 
